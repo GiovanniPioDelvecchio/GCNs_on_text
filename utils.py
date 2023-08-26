@@ -123,12 +123,15 @@ class GloveUtils:
         self.max_proj = 0
         self.min_proj = 0
         
-        with open(glove_path, 'r', encoding="utf-8") as f:
-          for line in f:
-            values = line.split()
-            word = values[0]
-            vector = np.asarray(values[1:], "float32")
-            self.embeddings_dict[word] = vector
+        if os.path.exists(glove_path):
+            with open(glove_path, 'r', encoding="utf-8") as f:
+              for line in f:
+                values = line.split()
+                word = values[0]
+                vector = np.asarray(values[1:], "float32")
+                self.embeddings_dict[word] = vector
+        else:
+            print("glove path missing")
             
     def embed_to_GloVe(self, tokens_to_embed, pca_flag = False):
       # Initialize an empty list to store the embeddings
@@ -206,7 +209,7 @@ class Dataset_from_sentences(Dataset):
         self._indices = range(self.len())
         self.transform = None
       else:
-        print("something strange happened")
+        print(f"missing local data in {path_were_save}, downloading...")
         super().__init__(path_were_save, transform)
         
 
