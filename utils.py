@@ -13,15 +13,29 @@ import os.path as osp
 import stanza
 from torch_geometric.data import Data, Batch, Dataset
 from torch_geometric.utils import to_networkx
+from torch.nn.functional import normalize
 
 # libraries for visualization 
 from tqdm import tqdm
 import networkx as nx
 import matplotlib.pyplot as plt
 
+# disable the commented kv pairs to get the appropriate models
+# for the pipeline
+config = {
+          'processors': 'tokenize,lemma,pos,depparse,ner',
+          'lang': 'en',
+          'tokenize_pretokenized': True, # disable tokenization
+          #'tokenize_model_path': '../TweebankNLP/twitter-stanza/saved_models/tokenize/en_tweet_tokenizer.pt',
+          #'lemma_model_path': '../TweebankNLP/twitter-stanza/saved_models/lemma/en_tweet_lemmatizer.pt',
+          #"pos_model_path": '../TweebankNLP/twitter-stanza/saved_models/pos/en_tweet_tagger.pt',
+          #"depparse_model_path": '../TweebankNLP/twitter-stanza/saved_models/depparse/en_tweet_parser.pt',
+          #"ner_model_path": '../TweebankNLP/twitter-stanza/saved_models/ner/en_tweet_nertagger.pt',
+          "use_gpu": True,
+}
 
 stanza.download("en")
-nlp = stanza.Pipeline('en', use_gpu = True)
+nlp = stanza.Pipeline(**config)
 
 def print_example(example_sentence):
   nlp_example_sentence = nlp(example_sentence)
@@ -29,14 +43,7 @@ def print_example(example_sentence):
   for sentence in nlp_example_sentence.sentences:
     cur_str = ""
     for word in sentence.words:
-      if len(word.text) < 2:
-        # we add an additional tabulation if the word is shorter than 2 characters
-        cur_str = f"id: {word.id}\tword: {word.text}\t\t\thead id: {word.head}" 
-      elif len(word.text) >= 10:
-        # we remove a tabulation
-        cur_str = f"id: {word.id}\tword: {word.text}\thead id: {word.head}"
-      else:
-        cur_str = f"id: {word.id}\tword: {word.text}\t\thead id: {word.head}"
+      cur_str = f"id: {word.id}\thead id: {word.head}\tdependency relation: {word.deprel}\tword: {word.text}"
       to_print.append(cur_str)
   for elem in to_print:
     print(elem)
@@ -115,14 +122,15 @@ def get_forest_from_sentence(to_tokenize, sentence_self_loop = False, positional
                                       sentence_self_loop)
 
 class GloveUtils:
-    def __init__(self, glove_path):
+    def __init__(self, glove_path, vocab_path = "content/g_utils/vocab.pk"):
         self.glove_path = glove_path
         self.vocabulary = {}
         self.embeddings_dict = {}
         self.pca = PCA(n_components=3)
         self.max_proj = 0
         self.min_proj = 0
-        
+        self.vocab_path = vocab_path
+        self.embed_dimension = 100
         if os.path.exists(glove_path):
             with open(glove_path, 'r', encoding="utf-8") as f:
               for line in f:
@@ -132,6 +140,11 @@ class GloveUtils:
                 self.embeddings_dict[word] = vector
         else:
             print("glove path missing")
+            
+        if os.path.exists(self.vocab_path):
+            self.load_vocab(self.vocab_path)
+        else:
+            print("saving directory missing")
             
     def embed_to_GloVe(self, tokens_to_embed, pca_flag = False):
       # Initialize an empty list to store the embeddings
@@ -144,7 +157,8 @@ class GloveUtils:
               self.vocabulary.update({token:self.embeddings_dict[token]})
           else:
             # If the token is not found in the vocabulary, you can assign a random embedding or any other handling strategy
-            random_embed = np.random.uniform(-0.25, 0.25, 50)
+            random_embed = np.random.uniform(-0.25, 0.25, self.embed_dimension)
+            random_embed = random_embed.astype("float32")
             embeddings.append(random_embed)
             self.vocabulary.update({token:random_embed})
 
@@ -167,6 +181,7 @@ class GloveUtils:
         return to_return
     
     def project_embeddings(self, embeddings):
+        self.__fit_pca__()
         projected_embed = self.pca.transform(embeddings)
         to_return = (projected_embed - self.min_proj) / (self.max_proj - self.min_proj)
         return to_return
@@ -189,7 +204,7 @@ class GloveUtils:
         if pca_flag:
            self.__fit_pca__()
 
-glove_path = 'content/embed/glove.6B.50d.txt'
+glove_path = '../TweebankNLP/twitter-stanza/data/wordvec/English/glove.twitter.27B.100d.txt'
 g_utils = GloveUtils(glove_path)
 
 # class containing the graph data that must be fed into the GCNs or GAT networks
@@ -278,6 +293,12 @@ class Dataset_from_sentences(Dataset):
           num_invalid += 1
       torch.save(Batch.from_data_list(self.data_list), self.raw_paths[0])
       torch.save(Batch.from_data_list(self.data_list), self.raw_url)
+      g_utils.serialize_vocab(g_utils.vocab_path)
+    
+    def normalize_and_save(self):
+        self.data_list.x = normalize(self.data_list.x, p = 1, dim = 1)
+        torch.save(self.data_list, self.raw_paths[0])
+        torch.save(self.data_list, self.raw_url)
 
 
 # function needed to clear a directory, it is necessary to call this function
