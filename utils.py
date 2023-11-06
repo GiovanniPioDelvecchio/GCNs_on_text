@@ -210,6 +210,8 @@ class GloveUtils:
 
 glove_path = '../TweebankNLP/twitter-stanza/data/wordvec/English/glove.twitter.27B.100d.txt'
 g_utils = GloveUtils(glove_path)
+bert_tok = BertTokenizerFast.from_pretrained("bert-base-uncased")
+bert_model = BertModel.from_pretrained("bert-base-uncased")
 
 # class containing the graph data that must be fed into the GCNs or GAT networks
 class Dataset_from_sentences(Dataset):
@@ -334,10 +336,6 @@ class Dataset_from_sentences(Dataset):
 
     def process(self):
       num_invalid = 0
-      if self.embedding == "bert":
-        bert_tok = BertTokenizerFast.from_pretrained("bert-base-uncased")
-        bert_model = BertModel.from_pretrained("bert-base-uncased")
-
       for idx, elem in tqdm(enumerate(self.sentences_list)):
         #dataset_name = f"data_{idx - num_invalid}.pt"
         if self.embedding == "glove":
