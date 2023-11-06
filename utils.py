@@ -5,7 +5,7 @@ from sklearn.decomposition import PCA
 
 # os related libraries
 import pickle
-import os 
+import os
 import shutil
 import os.path as osp
 
@@ -15,7 +15,7 @@ from torch_geometric.data import Data, Batch, Dataset
 from torch_geometric.utils import to_networkx
 from torch.nn.functional import normalize
 
-# libraries for visualization 
+# libraries for visualization
 from tqdm import tqdm
 import networkx as nx
 import matplotlib.pyplot as plt
@@ -25,7 +25,7 @@ import matplotlib.pyplot as plt
 config = {
           'processors': 'tokenize,lemma,pos,depparse,ner',
           'lang': 'en',
-          'tokenize_pretokenized': True, # disable tokenization
+          #'tokenize_pretokenized': True, # disable tokenization
           #'tokenize_model_path': '../TweebankNLP/twitter-stanza/saved_models/tokenize/en_tweet_tokenizer.pt',
           #'lemma_model_path': '../TweebankNLP/twitter-stanza/saved_models/lemma/en_tweet_lemmatizer.pt',
           #"pos_model_path": '../TweebankNLP/twitter-stanza/saved_models/pos/en_tweet_tagger.pt',
@@ -62,11 +62,11 @@ def get_tokens_and_dependencies(to_tokenize, sentence_self_loop = False, positio
         heads_arr = np.append(heads_arr, 0)
         id_arr = np.append(id_arr, 0)
       token_list = np.append(token_list, word.text)
-      heads_arr = np.append(heads_arr, word.head) 
-      id_arr = np.append(id_arr, word.id) 
+      heads_arr = np.append(heads_arr, word.head)
+      id_arr = np.append(id_arr, word.id)
     if idx != 0:
         max_to_add = max(to_return[f"{idx-1} dependency"][0])
-        dependency_arr = add_offset_to_links(id_arr, heads_arr, 
+        dependency_arr = add_offset_to_links(id_arr, heads_arr,
                                               offset = max_to_add)
     else:
         dependency_arr = add_offset_to_links(id_arr, heads_arr)
@@ -79,8 +79,8 @@ def add_offset_to_links(id_arr, heads_arr, offset = 0):
     if offset == 0:
         return [id_arr, heads_arr]
     for i in range(0, len(id_arr)):
-        id_arr[i] += offset + 1 
-        heads_arr[i] += offset + 1 
+        id_arr[i] += offset + 1
+        heads_arr[i] += offset + 1
     return [id_arr, heads_arr]
 
 
@@ -92,11 +92,11 @@ def add_positional_links(id_arr, heads_arr):
             heads_arr = np.append(heads_arr, id_arr[i + 1])
             id_arr = np.append(id_arr, id_arr[i + 1])
             heads_arr = np.append(heads_arr, id_arr[i])
-            
+
     to_return = np.vstack((id_arr, heads_arr))
     return to_return
 
-def forest_from_token_dep_dict(tok_dep_dict, sentence_self_loop = False):
+def forest_from_token_dep_dict(tok_dep_dict, sentence_self_loop = False, add_sep=None):
     num_sentences = len(tok_dep_dict.keys()) // 2
     all_tokens = []
     all_dep = []
@@ -107,19 +107,22 @@ def forest_from_token_dep_dict(tok_dep_dict, sentence_self_loop = False):
             cur_dep = tok_dep_dict[f"{i} dependency"]
             if sentence_self_loop:
                 first_nodes.append(cur_dep[0][0])
-            else: 
+            else:
                 first_nodes.append(cur_dep[0][0] - 1)
             all_dep[0] = np.concatenate((all_dep[0], cur_dep[0]))
             all_dep[1] = np.concatenate((all_dep[1], cur_dep[1]))
+
         else:
             all_dep.extend(tok_dep_dict[f"{i} dependency"])
+        if add_sep is not None and i != num_sentences-1:
+              all_tokens.append(add_sep)
     return {"tokens": all_tokens, "dependency": np.array(all_dep), "first_nodes":first_nodes}
 
-def get_forest_from_sentence(to_tokenize, sentence_self_loop = False, positional_links = True):
-    return forest_from_token_dep_dict(get_tokens_and_dependencies(to_tokenize, 
-                                                                  sentence_self_loop, 
-                                                                  positional_links), 
-                                      sentence_self_loop)
+def get_forest_from_sentence(to_tokenize, add_sep=None, sentence_self_loop = False, positional_links = True):
+    return forest_from_token_dep_dict(get_tokens_and_dependencies(to_tokenize,
+                                                                  sentence_self_loop,
+                                                                  positional_links),
+                                      sentence_self_loop, add_sep)
 
 class GloveUtils:
     def __init__(self, glove_path, vocab_path = "content/g_utils/vocab.pk"):
@@ -140,12 +143,12 @@ class GloveUtils:
                 self.embeddings_dict[word] = vector
         else:
             print("glove path missing")
-            
+
         if os.path.exists(self.vocab_path):
             self.load_vocab(self.vocab_path)
         else:
             print("saving directory missing")
-            
+
     def embed_to_GloVe(self, tokens_to_embed, pca_flag = False):
       # Initialize an empty list to store the embeddings
       embeddings = []
@@ -167,25 +170,25 @@ class GloveUtils:
           self.__fit_pca__()
       embeddings = np.array(embeddings)
       return embeddings
-    
+
     def __fit_pca__(self):
         to_fit = [self.vocabulary[word] for word in list(self.vocabulary.keys())]
         fitted_vocab = self.pca.fit_transform(to_fit)
         self.max_proj = np.amax(fitted_vocab)
         self.min_proj = np.amin(fitted_vocab)
-    
+
     def project_embedding(self, embed_to_project):
         #self.__fit_pca__()
         projected_embed = self.pca.transform(np.array([embed_to_project]))
         to_return = (projected_embed - self.min_proj) / (self.max_proj - self.min_proj)
         return to_return
-    
+
     def project_embeddings(self, embeddings):
         self.__fit_pca__()
         projected_embed = self.pca.transform(embeddings)
         to_return = (projected_embed - self.min_proj) / (self.max_proj - self.min_proj)
         return to_return
-    
+
     def project_tokens(self, tokens_to_project):
         n_tok = len(tokens_to_project)
         embeddings = self.embed_to_GloVe(tokens_to_project)
@@ -193,11 +196,11 @@ class GloveUtils:
         for i in range(0, n_tok):
             to_return[i, :] = self.project_embedding(embeddings[i, :])
         return to_return
-    
+
     def serialize_vocab(self, path):
         with open(path, 'wb') as f:
             pickle.dump(self.vocabulary, f)
-        
+
     def load_vocab(self, path, pca_flag = False):
         with open(path, 'rb') as f:
             self.vocabulary = pickle.load(f)
@@ -209,7 +212,7 @@ g_utils = GloveUtils(glove_path)
 
 # class containing the graph data that must be fed into the GCNs or GAT networks
 class Dataset_from_sentences(Dataset):
-    def __init__(self, name, path_were_save, drive_dir, sentences_list, y_values, transform=None):
+    def __init__(self, name, path_were_save, drive_dir, sentences_list, y_values, embedding="glove" ,transform=None):
       self.name = name
       self.drive_dir = drive_dir
       self.root = path_were_save
@@ -218,6 +221,7 @@ class Dataset_from_sentences(Dataset):
       self.data_list = []
       self.sentences_list = sentences_list
       self.y_values = y_values
+      self.embedding = embedding
       if os.path.exists(self.raw_paths[0]):
         self.data_list = torch.load(self.raw_paths[0])
         self.data_list.x = self.data_list.x.type(torch.FloatTensor)
@@ -226,17 +230,17 @@ class Dataset_from_sentences(Dataset):
       else:
         print(f"missing local data in {path_were_save}, downloading...")
         super().__init__(path_were_save, transform)
-        
+
 
     @property
     def processed_file_names(self):
       return self.raw_paths[0]
 
-    @property 
+    @property
     def raw_paths(self):
       to_return = self.root + "/" + self.name + ".pt"
       return [to_return]
-      
+
 
     def download(self):
       if os.path.exists(self.raw_url):
@@ -251,7 +255,7 @@ class Dataset_from_sentences(Dataset):
     def get(self, idx):
         return self.data_list[idx]
 
-    def __build_graph_Data_with_GloVe__(self, sentence, y_val, return_dep_dict = False, pca_flag = False):  
+    def __build_graph_Data_with_GloVe__(self, sentence, y_val, return_dep_dict = False, pca_flag = False):
         tok_dep_dict = get_forest_from_sentence(sentence)
         intra_sentence_data_list = []
 
@@ -261,8 +265,8 @@ class Dataset_from_sentences(Dataset):
             # the sentence is modelled as the directed dependency graph where the nodes
             # have the bert embeddings as features, since the verb of the main
             # sentence points to 0, node 0 has the pooler output as its features,
-            # as they represent the meaning of the whole sentence 
-            node_features = torch.vstack((glove_sentence_avg, glove_embeddings)) 
+            # as they represent the meaning of the whole sentence
+            node_features = torch.vstack((glove_sentence_avg, glove_embeddings))
             reshaped = glove_sentence_avg.reshape(1, list(glove_sentence_avg.shape)[0])
             for first_node in tok_dep_dict["first_nodes"]:
                 if first_node != 0:
@@ -276,7 +280,52 @@ class Dataset_from_sentences(Dataset):
             if return_dep_dict:
                 return batch, tok_dep_dict
         return batch
-    
+
+    def __build_graph_Data_with_BERT__(self, sentence, y_val, bert_model, bert_tok, return_dep_dict = False):
+        tok_dep_dict = get_forest_from_sentence(sentence, add_sep="[SEP]")
+        intra_sentence_data_list = []
+
+        if len(tok_dep_dict.keys()) > 0:
+            node_features = self._get_bert_embeddings(tok_dep_dict["tokens"], bert_model, bert_tok)
+            # the sentence is modelled as the directed dependency graph where the nodes
+            # have the bert embeddings as features, since the verb of the main
+            # sentence points to 0, node 0 has the pooler output as its features,
+            # as they represent the meaning of the whole sentence
+            if node_features.shape[0] != len(tok_dep_dict["tokens"]) + 1:
+              print("error with sentence:")
+              print(sentence)
+
+            edge_idxs = torch.tensor(tok_dep_dict[f"dependency"], dtype = torch.int64)
+            data = Data(x = node_features, edge_index = edge_idxs, y = y_val)
+            intra_sentence_data_list.append(data)
+            batch = Batch.from_data_list(intra_sentence_data_list)
+            if return_dep_dict:
+                return batch, tok_dep_dict
+        return batch
+
+    def _get_bert_embeddings(tokens, model, tokenizer):
+      """
+      Creates the tensor from with the bert embeddings of the sentences in tokens.
+      The output contains as first embedding the pooler output.
+      The encodings of sub-words are combined with a mean to obtain an approximate
+      encoding for the full token.
+      params:
+        tokens: list of tokens to be embedded. Must contain "sep" tokens in case of multiple sentences
+        model: bert model to use for embeddings
+        tokenizer: tokenizer for the model model
+      return:
+        word_embeddings: tensor of dimension [len(tokens)+1, embedding dimension]
+      """
+      encoded = tokenizer([" ".join(tokens)])
+      with torch.inference_mode():
+        output = model(**encoded.convert_to_tensors("pt"))
+        embeddings = output.last_hidden_state.squeeze()
+        pooler = output.pooler_output.squeeze()
+      word_embeddings = pooler
+      for idx, word in enumerate(tokens):
+        start, end = encoded.word_to_tokens(idx)
+        word_embeddings = torch.vstack((word_embeddings, embeddings[start:end].mean(dim=0)))
+      return word_embeddings
 
     def to(self, device):
       self.data_list.to(device)
@@ -284,17 +333,27 @@ class Dataset_from_sentences(Dataset):
 
     def process(self):
       num_invalid = 0
+      if self.embedding == "bert":
+        bert_tok = BertTokenizerFast.from_pretrained("bert-base-uncased")
+        bert_model = BertModel.from_pretrained("bert-base-uncased")
+
       for idx, elem in tqdm(enumerate(self.sentences_list)):
         #dataset_name = f"data_{idx - num_invalid}.pt"
-        to_save = self.__build_graph_Data_with_GloVe__(elem, self.y_values[idx])
+        if self.embedding == "glove":
+          to_save = self.__build_graph_Data_with_GloVe__(elem, self.y_values[idx])
+        elif self.embedding == "bert":
+          to_save = self.__build_graph_Data_with_BERT(elem, self.y_values[idx], bert_model, bert_tok)
+        else:
+          raise NotImplementedError(f"Embedding type not supported: {self.embedding}")
         if to_save is not None:
           self.data_list.append(to_save)
         else:
           num_invalid += 1
       torch.save(Batch.from_data_list(self.data_list), self.raw_paths[0])
       torch.save(Batch.from_data_list(self.data_list), self.raw_url)
-      g_utils.serialize_vocab(g_utils.vocab_path)
-    
+      if self.embedding == "glove":
+        g_utils.serialize_vocab(g_utils.vocab_path)
+
     def normalize_and_save(self):
         self.data_list.x = normalize(self.data_list.x, p = 1, dim = 1)
         torch.save(self.data_list, self.raw_paths[0])
@@ -347,10 +406,10 @@ def visualize_graph(G, td_dict = []):
                          labels = labels,
                          node_color=colors, cmap="Set2")
     plt.show()
-    
+
 def visualize_hidden_graph(x_features, links, labels = [], project_flag = True, k_custom = None):
     to_draw = nx.MultiDiGraph()
-    links_for_the_net = list(zip(links[0, :].detach().cpu().numpy(), 
+    links_for_the_net = list(zip(links[0, :].detach().cpu().numpy(),
                                  links[1, :].detach().cpu().numpy()))
     to_draw.add_edges_from(links_for_the_net)
     embeds = x_features.detach().cpu()
@@ -361,7 +420,7 @@ def visualize_hidden_graph(x_features, links, labels = [], project_flag = True, 
         colors = embeds # if embeds has a number of columns different from 3, some
                         # aggregation must be performed before calling this
                         # function with project_flag == False
-    
+
     plt.figure(figsize=(7,7))
     plt.xticks([])
     plt.yticks([])
