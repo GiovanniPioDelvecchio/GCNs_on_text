@@ -215,10 +215,10 @@ bert_model = BertModel.from_pretrained("bert-base-uncased")
 
 # class containing the graph data that must be fed into the GCNs or GAT networks
 class Dataset_from_sentences(Dataset):
-    def __init__(self, name, path_were_save, drive_dir, sentences_list, y_values, embedding="glove" ,transform=None):
+    def __init__(self, name, path_where_save, drive_dir, sentences_list, y_values, embedding="glove" ,transform=None):
       self.name = name
       self.drive_dir = drive_dir
-      self.root = path_were_save
+      self.root = path_where_save
       self.raw_url = str(self.drive_dir + self.name + ".pt")
       print(self.raw_paths)
       self.data_list = []
@@ -231,8 +231,8 @@ class Dataset_from_sentences(Dataset):
         self._indices = range(self.len())
         self.transform = None
       else:
-        print(f"missing local data in {path_were_save}, downloading...")
-        super().__init__(path_were_save, transform)
+        print(f"missing local data in {path_where_save}, downloading...")
+        super().__init__(path_where_save, transform)
 
 
     @property
@@ -306,7 +306,7 @@ class Dataset_from_sentences(Dataset):
                 return batch, tok_dep_dict
         return batch
 
-    def _get_bert_embeddings(tokens, model, tokenizer):
+    def _get_bert_embeddings(self, tokens, model, tokenizer):
       """
       Creates the tensor from with the bert embeddings of the sentences in tokens.
       The output contains as first embedding the pooler output.
@@ -341,7 +341,7 @@ class Dataset_from_sentences(Dataset):
         if self.embedding == "glove":
           to_save = self.__build_graph_Data_with_GloVe__(elem, self.y_values[idx])
         elif self.embedding == "bert":
-          to_save = self.__build_graph_Data_with_BERT(elem, self.y_values[idx], bert_model, bert_tok)
+          to_save = self.__build_graph_Data_with_BERT__(elem, self.y_values[idx], bert_model, bert_tok)
         else:
           raise NotImplementedError(f"Embedding type not supported: {self.embedding}")
         if to_save is not None:
