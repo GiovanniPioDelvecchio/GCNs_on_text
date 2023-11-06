@@ -14,6 +14,7 @@ import stanza
 from torch_geometric.data import Data, Batch, Dataset
 from torch_geometric.utils import to_networkx
 from torch.nn.functional import normalize
+from transformers import BertTokenizerFast, BertModel
 
 # libraries for visualization
 from tqdm import tqdm
