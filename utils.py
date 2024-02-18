@@ -126,7 +126,7 @@ def get_forest_from_sentence(to_tokenize, add_sep=None, sentence_self_loop = Fal
                                       sentence_self_loop, add_sep)
 
 class GloveUtils:
-    def __init__(self, glove_path, vocab_path = "content/g_utils/vocab.pk"):
+    def __init__(self, glove_path, vocab_path = "./glove_vocab.pkl"):
         self.glove_path = glove_path
         self.vocabulary = {}
         self.embeddings_dict = {}
@@ -208,22 +208,24 @@ class GloveUtils:
         if pca_flag:
            self.__fit_pca__()
 
-glove_path = '../TweebankNLP/twitter-stanza/data/wordvec/English/glove.twitter.27B.100d.txt'
+glove_path = './glove.twitter.27B.100d.txt'
 g_utils = GloveUtils(glove_path)
 bert_tok = BertTokenizerFast.from_pretrained("bert-base-uncased")
 bert_model = BertModel.from_pretrained("bert-base-uncased")
 
 # class containing the graph data that must be fed into the GCNs or GAT networks
 class Dataset_from_sentences(Dataset):
-    def __init__(self, name, path_where_save, drive_dir, sentences_list, y_values, embedding="glove" ,transform=None):
+    def __init__(self, name, path_where_save, drive_dir, sentences_list = None, y_values = None, embedding="glove" ,transform=None):
       self.name = name
       self.drive_dir = drive_dir
       self.root = path_where_save
       self.raw_url = str(self.drive_dir + self.name + ".pt")
       print(self.raw_paths)
       self.data_list = []
-      self.sentences_list = sentences_list
-      self.y_values = y_values
+      if sentences_list != None:
+        self.sentences_list = sentences_list
+      if y_values != None:
+        self.y_values = y_values
       self.embedding = embedding
       if os.path.exists(self.raw_paths[0]):
         self.data_list = torch.load(self.raw_paths[0])
@@ -435,3 +437,160 @@ def visualize_hidden_graph(x_features, links, labels = [], project_flag = True, 
     plt.show()
 
 print("Utils have been correctly loaded")
+
+if __name__ == '__main__':
+  
+  import pandas as pd
+  import re
+  from sklearn.model_selection import train_test_split
+  from torch_geometric.loader import DataLoader
+
+  df=pd.read_csv("./Corona_NLP_train.csv", encoding='latin1')
+  # checking for null values
+  overview=pd.concat([df.isnull().sum(),df.nunique()],axis=1,keys=['Null Counts','Cardinality'])
+  overview
+  # and removing them:
+  idx=df.loc[df.Location.isnull()].index
+  df_clean=df.drop(idx)
+  df_clean.shape
+  df_clean[df_clean["OriginalTweet"] == ""]
+  df.drop(columns=['UserName','ScreenName','Location','TweetAt'], inplace=True)
+  def get_long_tweets(df, tweet_lengths):
+      to_retrun = df.loc[tweet_lengths >= 10]
+      return to_retrun
+  tweet_lengths = df['OriginalTweet'].apply(lambda x: len(x.split()))
+  df_lengthy = get_long_tweets(df, tweet_lengths)
+  print(df_lengthy.shape)
+  # tweet cleaning
+  # tweets with a low number of tokens should be eliminated
+
+  def preprocessing(x):
+
+      def remove_hashtags(text): return re.sub(r'#', '' , text)
+      def remove_mentions(text): return re.sub(r'@', '' , text)
+      def remove_urls(text): return re.sub(r'https?://\S+', ' ', text)
+      def change_apostrophe(text): return re.sub(r"Â’", "\'", text)
+      def remove_special_chars(text): return re.sub(r"[^\w. ',-]", ' ', text)
+      def remove_numbers(text): return re.sub(r'[\d]', ' ', text)
+      def remove_formatting_symbols(text): return re.sub(r"[\r\n]+",'',text)
+      def remove_escape_characters(text): return re.sub(r"\\",'',text)
+      def remove_extra_spaces(text): return re.sub(r"\s{2,}",' ',text)
+      def remove_space_before_period(text): return re.sub(r"\s\.", ".", text)
+      def remove_strange_a(text): return "".join(c if ord(c)!=226 else "a" for c in text )
+      x=x.apply(remove_hashtags)
+      x=x.apply(remove_mentions)
+      x=x.apply(remove_urls)
+      x=x.apply(change_apostrophe)
+      x=x.apply(remove_special_chars)
+      x=x.apply(remove_numbers)
+      x=x.apply(remove_formatting_symbols)
+      x=x.apply(remove_escape_characters)
+      x=x.apply(remove_extra_spaces)
+      x=x.apply(remove_space_before_period)
+      x=x.str.lower()
+      x=x.apply(remove_strange_a)
+      return x
+  
+  def label_preprocessing(labels):
+    lab_dict={
+        'Extremely Negative': 0,
+        'Negative': 1,
+        'Neutral': 2,
+        'Positive': 3,
+        'Extremely Positive': 4
+    }
+    labels = labels.map(lab_dict)
+    print(labels)
+    
+    return labels
+  
+  def label_preprocessing_list(labels):
+    lab_dict={
+        'Extremely Negative': 0,
+        'Negative': 1,
+        'Neutral': 2,
+        'Positive': 3,
+        'Extremely Positive': 4
+    }
+    labels = list(map(lab_dict.get, labels))
+    #print(labels)
+    
+    return labels
+
+  df_lengthy['OriginalTweet'] = preprocessing(df_lengthy['OriginalTweet'])
+  df_to_use = df_lengthy[df_lengthy["OriginalTweet"] != " "]
+  #print(df_to_use['Sentiment'] )
+  #df_to_use['Sentiment'] = label_preprocessing(df_to_use['Sentiment'])
+  #print(df_to_use['Sentiment'] )
+
+  train_split, test_split = train_test_split(df_to_use, test_size = 0.2, random_state = 10,
+                                            stratify =  df_to_use["Sentiment"])
+  train_split, val_split = train_test_split(train_split, test_size = 0.2, random_state = 10,
+                                            stratify =  train_split["Sentiment"])
+  print(f"train shape: {train_split.shape}, val shape:{val_split.shape}, test shape:{test_split.shape}")
+
+  tweet_list_train = train_split["OriginalTweet"].tolist()
+  tweet_list_val = val_split["OriginalTweet"].tolist()
+  tweet_list_test = test_split["OriginalTweet"].tolist()
+  sentiment_list_train = train_split["Sentiment"].tolist()
+  sentiment_list_val = val_split["Sentiment"].tolist()
+  sentiment_list_test = test_split["Sentiment"].tolist()
+
+  # remove this if what happens is consistent
+  #print(f'tweet_list_train:\n{tweet_list_train}')
+  #print(f'sentiment_list_train:\n{sentiment_list_train}')
+  #print(f'Sentiment list train converted: {label_preprocessing_list(sentiment_list_train)}')
+
+  sentiment_list_proc_train = label_preprocessing_list(sentiment_list_train)
+  sentiment_list_proc_val = label_preprocessing_list(sentiment_list_val)
+  sentiment_list_proc_test = label_preprocessing_list(sentiment_list_test)
+
+  #delete_processed_files("NewDataset/processed_train/")
+  delete_processed_files("NewDataset/processed_val/")
+
+  #cv19_train = Dataset_from_sentences("train", "NewDataset/processed_train/", "NewDataset/processed_train/", tweet_list_train, sentiment_list_proc_train)
+  cv19_val = Dataset_from_sentences("train", "NewDataset/processed_val/", "NewDataset/processed_val/", tweet_list_val, sentiment_list_proc_val)
+  cv19_test = Dataset_from_sentences("train", "NewDataset/processed_test/", "NewDataset/processed_test/", tweet_list_test, sentiment_list_proc_test)
+  
+  #with open('./NewDataset/processed_train/graph_train.pkl', 'wb') as dt_file:
+  #  pickle.dump(cv19_train, dt_file)
+  
+  with open('./NewDataset/processed_val/graph_val.pkl', 'wb') as dv_file:
+    pickle.dump(cv19_val, dv_file)
+
+  with open('./NewDataset/processed_test/graph_test.pkl', 'wb') as dtest_file:
+    pickle.dump(cv19_test, dtest_file)
+  
+  with open('./NewDataset/processed_train/graph_train.pkl', 'rb') as dt_file:
+    cv19_train = pickle.load(dt_file)
+
+  with open('./NewDataset/processed_val/graph_val.pkl', 'rb') as dv_file:
+    cv19_val = pickle.load(dv_file)
+
+  with open('./NewDataset/processed_test/graph_test.pkl', 'rb') as dtest_file:
+    cv19_test = pickle.load(dtest_file)
+
+  #print(cv19_train.sentences_list)
+  #print(cv19_train.y_values)
+  
+  #print(cv19_train.data_list.x)
+  #print(cv19_train.data_list.y)
+
+  #print(cv19_train.data_list)
+  #collated = Batch.from_data_list(cv19_train.data_list)
+  #print(collated.y)
+  #print(cv19_train.sentences_list)
+  #print(cv19_train.y_values)
+
+  print(cv19_val.data_list)
+  collated = Batch.from_data_list(cv19_val.data_list)
+  print(collated.y)
+  print(cv19_val.sentences_list)
+  print(cv19_val.y_values)
+
+  print(cv19_test.data_list)
+  collated = Batch.from_data_list(cv19_test.data_list)
+  print(collated.y)
+  print(cv19_test.sentences_list)
+  print(cv19_test.y_values)
+
