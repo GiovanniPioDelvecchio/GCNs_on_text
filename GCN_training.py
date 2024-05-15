@@ -1,42 +1,68 @@
+""" 
+-------------------------------------------------------------------------- 
+NLP project work
+Summary: Casting text classification to Graph Classification for Sentiment Analysis of Tweets
+Members:
+
+-Dell'Olio Domenico
+-Delvecchio Giovanni Pio
+-Disabato Raffaele
+
+The project was developed in order to evaluate the effectiveness of Graph Neural network on a sentiment analysis task proposed in the challenge:
+https://www.kaggle.com/datasets/datatattle/covid-19-nlp-text-classification?resource=download
+
+We decided to implement and test various architectures, including commonly employed transformer-based architectures, in order to compare their performances.
+These architectures were either already present at the state of the art or were obtained as a result of experiments.
+-------------------------------------------------------------------------- 
+This script contains:
+- LSTM + 3 layers GAT + linear architecture
+- training function for said model
+"""
+
+# general imports
 import utils
 import copy
 import numpy as np
 import matplotlib.pyplot as plt
 from tqdm import tqdm
+from functools import partial
 
+# torch imports
 import torch
 from torch import save, load
 import torch.nn as nn
 from torchsummary import summary
+import torch.nn.functional as F
+from torch.nn import Linear, Dropout
+from torch.optim.lr_scheduler import StepLR
+from torch.optim.lr_scheduler import CosineAnnealingLR
+from torch.optim.lr_scheduler import PolynomialLR
+from torch.optim.lr_scheduler import OneCycleLR
 
+#torch geometric imports
 from torch_geometric.data import Data, Batch
 from torch_geometric.loader import DataLoader
 from torch_geometric.data import Dataset, InMemoryDataset
 from torch_geometric.utils import scatter
 from torch_geometric.data import download_url
-
-from torch_geometric.nn import GCNConv, GATv2Conv, global_mean_pool
-import torch.nn.functional as F
-from torch.nn import Linear, Dropout
-
-from functools import partial
-from torch.optim.lr_scheduler import StepLR
-from torch.optim.lr_scheduler import CosineAnnealingLR
-from torch.optim.lr_scheduler import PolynomialLR
 from torch_geometric.nn.pool import global_max_pool
-from torch.optim.lr_scheduler import OneCycleLR
+from torch_geometric.nn import GCNConv, GATv2Conv, global_mean_pool
 
 
+# setting pytorch device
 device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
 print(device)
 
-
+# dataset initialization
 tweet_list_train = []
 sentiment_list_train = []
+
 tweet_list_val = []
 sentiment_list_val = []
+
 tweet_list_test = []
 sentiment_list_test = []
+
 cv19_graph_data_train = utils.Dataset_from_sentences("train", "GraphDataset/train/",
                                                      "/content/drive/MyDrive/glove_twitter_100_unnormalized/train/",
                                                      tweet_list_train, sentiment_list_train)
@@ -54,15 +80,20 @@ print(cv19_graph_data_val)
 print("Loaded test dataset:")
 print(cv19_graph_data_test)
 
-# actual GAT class
-class GAT_lstm(torch.nn.Module):
-  """Graph Attention Network"""
-  def __init__(self, dim_in, n_filters, dim_out, heads= 8):
-    super().__init__()
-    # dim_in is the number of node features, dim_h is the dimension
-    # of the hidden layer, dim_out is the dimension of the output
-    # feature vector
 
+class GAT_lstm(torch.nn.Module):
+  """
+    Graph Attention Network class.
+  """
+  def __init__(self, dim_in, n_filters, dim_out, heads= 8):
+    """
+        Constructor method for the GAT class.
+        :param dim_in: number of node features
+        :param n_fiters: number of GAT filters to be used for each layer
+        :param dim_out: dimension of the output
+        :param heads: number of attention heads to be used by the GAT convolution layers
+    """
+    super().__init__()
 
     #self.first_linear = Linear(dim_in, dim_in)
 
@@ -87,10 +118,16 @@ class GAT_lstm(torch.nn.Module):
                                       weight_decay=5e-5)
 
   def forward(self, x, edge_index, batch, enable_log = False):
-    # the parameters of the forward correspond to data.x and data.edge_index
-    # where data is a Data object like those described above;
+    """
+    Forward function.
+    :param x: graph node features. Corresponds to data.x, where data is a point sampled from the graph dataset
+    :param edge_index: edge index data. corresponds to data.edge_index, where data is a point sampleed from the graph dataset
+    :param batch: data batch containing all the graph structures.
+    :param enable_log: enables some prints to visualize hidden graphs
+    """
     stack_list = []
     batch_elements = batch.unique()
+    # pass each graph through lstm
     for elem in batch_elements:
       idxs = torch.where(batch == elem)
       current_graph = x[idxs]
@@ -99,13 +136,9 @@ class GAT_lstm(torch.nn.Module):
       stack_list.append(to_stack)
 
     h_to_gat = torch.vstack(stack_list)
-    #print(h_to_gat.shape)
-    #print(x.shape)
-
-    #h_stacked = global_mean_pool(h_stacked, batch)
-    #h_stacked = self.classifier(h_stacked)
 
     h_list = []
+    # pass each graph in the three gat layers
     for i, gat_l in enumerate(self.gat_list_1):
         h = h_to_gat + gat_l(h_to_gat, edge_index)
         h = h.tanh()
@@ -119,18 +152,30 @@ class GAT_lstm(torch.nn.Module):
         h = self.l_list[i](h)
         h_list.append(h)
 
+    # apply classification
     h_layers = torch.hstack(h_list)
     h_layers = self.classifier(h_layers)
     return h_layers
   
 class EarlyStopper:
+  """
+    Simple EarlyStopper class
+  """
   def __init__(self, patience=1, min_delta=0):
+      """
+      :param patience: number of epochs to wait if the loss doesn't decrease.
+      :min_delta: minimum fluctuation of the loss to be considered as consistent change
+      """
       self.patience = patience
       self.min_delta = min_delta
       self.counter = 0
       self.min_validation_loss = np.inf
 
   def early_stop(self, validation_loss):
+      """
+      early stopping function.
+      :param validation_loss: value of the loss computed on the validation set
+      """
       if validation_loss < self.min_validation_loss:
           self.min_validation_loss = validation_loss
           self.counter = 0
@@ -143,9 +188,8 @@ class EarlyStopper:
 def plot_losses(train_losses, val_losses):
     """
     Plots the training and validation losses over the course of training.
-    Args:
-        train_losses: A list of training losses.
-        val_losses: A list of validation losses.
+    :param train_losses: A list of training losses.
+    :param val_losses: A list of validation losses.
     """
     plt.plot(train_losses, label='Train Loss')
     plt.plot(val_losses, label='Validation Loss')
@@ -155,12 +199,27 @@ def plot_losses(train_losses, val_losses):
     plt.show()
 
 def accuracy(pred_y, y):
-    """Calculate accuracy."""
+    """
+    Calculates accuracy.
+    :param pred_y: tensor containing the predictions for the split.
+    :param y: tensor containing the ground truths for the split
+    """
     return ((pred_y == y).sum() / len(y)).item()
 
 import time
 def train(model, strat_train, strat_val, partial_scheduler, epochs = 30, batch_size = 30, print_every = 1, path='Model'):
-    """Train a GNN model and return the trained model."""
+    """
+        Trains a GNN model and return the trained model.
+        :param model: Torch model to be trained.
+        :param strat_train: train split to be loaded into a torch DataLoader
+        :param strat_val: validation split to be loaded into a torch DataLoader
+        :param partial_scheduler: learning rate scheduler wrappped in a functools partial
+        :param epochs: number of training epochs
+        :param batch_size: batch dimensi0on
+        :param print_every: interval of epochs to wait when logging partial results
+        :param path: string containing the path to the model
+    """
+
     batch_size = batch_size
     criterion = torch.nn.CrossEntropyLoss(label_smoothing = 0.01)
     optimizer = model.optimizer
@@ -168,7 +227,7 @@ def train(model, strat_train, strat_val, partial_scheduler, epochs = 30, batch_s
     print(type(scheduler))
     loader_train =  DataLoader(strat_train.data_list, batch_size=batch_size, shuffle=True)
     loader_val = DataLoader(strat_val.data_list, batch_size=batch_size, shuffle=True)
-    model.train()
+    
     early_stopper = EarlyStopper(patience=10, min_delta=0.2)
 
     train_losses = []
@@ -178,19 +237,20 @@ def train(model, strat_train, strat_val, partial_scheduler, epochs = 30, batch_s
     best_acc_val = 0
     epochs_to_return = 0
     start_t = time.time()
-    #scheduler.step()
+
     for epoch in range(epochs+1):
       mean_loss_train = 0
       mean_acc_train = 0
+      model.train()
       for i, batch in enumerate(loader_train):
         # Training
-
         out = model(batch.x.to(device), batch.edge_index.to(device), batch.batch.to(device))
         loss_train = criterion(out, batch.y.long().to(device))
         mean_loss_train += loss_train.item()
 
         acc_train = accuracy(out.argmax(dim=1), batch.y.to(device))
         mean_acc_train += acc_train
+        # backward + scheduler/oprimizers step
         loss_train.backward()
         with torch.no_grad():
             optimizer.step()
@@ -203,10 +263,11 @@ def train(model, strat_train, strat_val, partial_scheduler, epochs = 30, batch_s
       train_losses.append(mean_loss_train)
       if type(scheduler) != OneCycleLR:
           scheduler.step()
-
+      
+      # evaluation
       mean_loss_val = 0
       mean_acc_val = 0
-      #model.eval()
+      model.eval()
       with torch.no_grad():
           for i, batch in enumerate(loader_val):
             out = model(batch.x.to(device), batch.edge_index.to(device), batch.batch.to(device))
@@ -219,6 +280,7 @@ def train(model, strat_train, strat_val, partial_scheduler, epochs = 30, batch_s
           mean_acc_val /= (i + 1)
           val_losses.append(mean_loss_val)
           if mean_acc_val > best_acc_val:
+                # best checkpoint saving
                 best_acc_val = mean_acc_val
                 best_model_state_dict = model.state_dict
                 torch.save(model.state_dict(), path + '_ckpt')
@@ -239,10 +301,20 @@ def train(model, strat_train, strat_val, partial_scheduler, epochs = 30, batch_s
     return best_model_state_dict, best_acc_val, epochs_to_return
 
 def get_lr(optimizer):
+    """
+    gets current learning rate from the optimizer
+    :param optimizer: a torch.optim Optimizer
+    """
     for param_group in optimizer.param_groups:
         return param_group['lr']
 
 def build_scheduler_list(epochs = 30, max_lr = 1e-3, num_batches = 1):
+    """
+    Builds a scheduler list to be tested.
+    :param epochs: epochs to be used during training
+    :param max_lr: upper learning rate bound for OneCycleLR scheduler
+    :param num_batches: number of steps within an epoch
+    """
     schedulers = []
 
     #schedulers += [partial(PolynomialLR,
@@ -261,6 +333,15 @@ def build_scheduler_list(epochs = 30, max_lr = 1e-3, num_batches = 1):
     return schedulers
 
 def hyperparameter_tuning(model, strat_train, strat_val, scheduler_list, batch_size = 30, epochs = 30):
+    """
+    Function performing hyperparameter tuning (testing different schedulers)
+    :param model: model to be tuned
+    :param strat_train: train split to be loaded into a torch DataLoader
+    :param strat_val: validation split to be loaded into a torch DataLoader
+    :param scheduler_list: list of schedulers to be tested
+    :param batch_size: dimension of the batch
+    :param epochs: number of training epochs
+    """
     print(f"batch size: {batch_size}")
     best_valid_acc = 0
     best_model = []
@@ -269,10 +350,12 @@ def hyperparameter_tuning(model, strat_train, strat_val, scheduler_list, batch_s
     i = 1
     for partial_scheduler in scheduler_list:
         #path = f'/content/drive/MyDrive/graphmod/GAT_best_{partial_scheduler.func.__name__}_{i}'
+        # trains the model with given scheduler and saves best result
         path = f'./GAT_best_{partial_scheduler.func.__name__}_{i}'
         model_out, mean_acc_val, epoch = train(copy.deepcopy(model), strat_train, strat_val,
                                                partial_scheduler, epochs, batch_size = batch_size, print_every=1, path=path)
         torch.save(model_out, path)
+        # also selects and returns the best model among the schedulers
         if mean_acc_val > best_val_acc:
             best_val_acc = mean_acc_val
             best_model = model_out
@@ -281,28 +364,19 @@ def hyperparameter_tuning(model, strat_train, strat_val, scheduler_list, batch_s
         i = i + 1
     return best_hyper_params, best_model
 
-
-model_gat = GAT_lstm(cv19_graph_data_train.num_node_features,
-                cv19_graph_data_train.num_classes*2,
-                cv19_graph_data_train.num_classes, heads = 10).to(device)
-print(model_gat)
-
-epochs = 300
-# da rifare esperimenti col polinomial 2
-# training information from stepLR (2) to CosineAnnealing
-print(get_lr(model_gat.optimizer))
-scheduler_list = build_scheduler_list(epochs=epochs,
-                                      num_batches=(len(cv19_graph_data_train.data_list)//256) + 4)
-print(scheduler_list)
-trained_gat = hyperparameter_tuning(model_gat, cv19_graph_data_train,
-                                    cv19_graph_data_val, scheduler_list,
-                                    batch_size = 256, epochs = epochs)
-
 def eval_model(model, loader_val, criterion, batch_size):
+  """
+  performs model evaluation
+  :params model: model to be evaluated
+  :params loader_val: torch DataLoader for the validation set
+  :params criterion: loss to be computed
+  :params batch size: batch dimension for inference
+  """
   mean_loss_val = 0
   mean_acc_val = 0
-  #model.eval()
+  model.eval()
   idx_wrong_samples = np.array([])
+
   with torch.no_grad():
       for i, batch in tqdm(enumerate(loader_val)):
         out = model(batch.x.to(device), batch.edge_index.to(device), batch.batch.to(device))
@@ -315,8 +389,29 @@ def eval_model(model, loader_val, criterion, batch_size):
         #visualize_embedding(embed, batch.y, epoch, loss_val)
       mean_loss_val /= (i + 1)
       mean_acc_val /= (i + 1)
+  # returns also misclassified examples
   return mean_loss_val, mean_acc_val, idx_wrong_samples
 
+
+# ---------------- training script --------------------
+# model declatation
+model_gat = GAT_lstm(cv19_graph_data_train.num_node_features,
+                cv19_graph_data_train.num_classes*2,
+                cv19_graph_data_train.num_classes, heads = 10).to(device)
+print(model_gat)
+
+epochs = 300
+
+print(get_lr(model_gat.optimizer))
+scheduler_list = build_scheduler_list(epochs=epochs,
+                                      num_batches=(len(cv19_graph_data_train.data_list)//256) + 4)
+# performs truning
+print(scheduler_list)
+trained_gat = hyperparameter_tuning(model_gat, cv19_graph_data_train,
+                                    cv19_graph_data_val, scheduler_list,
+                                    batch_size = 256, epochs = epochs)
+
+# reloads model
 try:
     trained_gat_model = trained_gat[1]
 except Exception as e:
@@ -327,6 +422,7 @@ except Exception as e:
 
 print(trained_gat_model)
 
+# performs test evaluation
 batch_size = 64
 loader_test = DataLoader(cv19_graph_data_test.data_list, batch_size=batch_size, shuffle=False)
 criterion = torch.nn.CrossEntropyLoss(label_smoothing = 0.01)
