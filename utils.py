@@ -1,3 +1,24 @@
+""" 
+-------------------------------------------------------------------------- 
+NLP project work
+Summary: Casting text classification to Graph Classification for Sentiment Analysis of Tweets
+Members:
+
+-Dell'Olio Domenico
+-Delvecchio Giovanni Pio
+-Disabato Raffaele
+
+The project was developed in order to evaluate the effectiveness of Graph Neural network on a sentiment analysis task proposed in the challenge:
+https://www.kaggle.com/datasets/datatattle/covid-19-nlp-text-classification?resource=download
+
+We decided to implement and test various architectures, including commonly employed transformer-based architectures, in order to compare their performances.
+These architectures were either already present at the state of the art or were obtained as a result of experiments.
+-------------------------------------------------------------------------- 
+This script contains:
+- Helper functions and classes to perform dataset conversion to graph structures with both bert and glove embeddings
+- Helper functions for graph visualization
+"""
+
 # math related libraries
 import numpy as np
 import torch
@@ -21,6 +42,8 @@ from tqdm import tqdm
 import networkx as nx
 import matplotlib.pyplot as plt
 
+
+## Loads stanza nlp pipeline
 # disable the commented kv pairs to get the appropriate models
 # for the pipeline
 config = {
@@ -38,30 +61,28 @@ config = {
 stanza.download("en")
 nlp = stanza.Pipeline(**config)
 
-def print_example(example_sentence):
-  nlp_example_sentence = nlp(example_sentence)
-  to_print = []
-  for sentence in nlp_example_sentence.sentences:
-    cur_str = ""
-    for word in sentence.words:
-      cur_str = f"id: {word.id}\thead id: {word.head}\tdependency relation: {word.deprel}\tword: {word.text}"
-      to_print.append(cur_str)
-  for elem in to_print:
-    print(elem)
 
-# function for the construction of the dictionary containing tokens and
-# dependencies
 def get_tokens_and_dependencies(to_tokenize, sentence_self_loop = False, positional_links = False):
+  """
+  function for the construction of the dictionaty containing tokens and dependencies
+  :param to_tokenize: string containing the phrase to tokenize and analyze
+  :param sentence_self_loop: boolean indicating whether the graph has the out-edge from the sentence-representing note entering in the node itself
+  :param positional_links: boolean indicating whether to add positional links (edges relating to the position)
+  """
+  # tokenize sentence
   nlp_dep = nlp(to_tokenize)
   to_return = {}
   for idx, sentence in enumerate(nlp_dep.sentences):
     token_list = np.array([])
     id_arr = np.array([], dtype=np.int32)
     heads_arr = np.array([], dtype=np.int32)
+    #for each word
     for i, word in enumerate(sentence.words):
+      # adds edges
       if i == 0 and sentence_self_loop:
         heads_arr = np.append(heads_arr, 0)
         id_arr = np.append(id_arr, 0)
+      
       token_list = np.append(token_list, word.text)
       heads_arr = np.append(heads_arr, word.head)
       id_arr = np.append(id_arr, word.id)
@@ -71,12 +92,17 @@ def get_tokens_and_dependencies(to_tokenize, sentence_self_loop = False, positio
                                               offset = max_to_add)
     else:
         dependency_arr = add_offset_to_links(id_arr, heads_arr)
+
     if positional_links:
         dependency_arr = add_positional_links(dependency_arr[0], dependency_arr[1])
     to_return.update({f"{idx} tokens": token_list, f"{idx} dependency":dependency_arr})
+
   return to_return
 
 def add_offset_to_links(id_arr, heads_arr, offset = 0):
+    """
+    function adding an offset 
+    """
     if offset == 0:
         return [id_arr, heads_arr]
     for i in range(0, len(id_arr)):
@@ -436,161 +462,20 @@ def visualize_hidden_graph(x_features, links, labels = [], project_flag = True, 
                          node_color=colors, cmap="Set2")
     plt.show()
 
+def print_example(example_sentence):
+  """
+  Function printing an example sentence with the respective NER labels obtained with stanza
+  :param example_sentence: string containing the sample sentence to print
+  """
+  nlp_example_sentence = nlp(example_sentence)
+  to_print = []
+  for sentence in nlp_example_sentence.sentences:
+    cur_str = ""
+    for word in sentence.words:
+      cur_str = f"id: {word.id}\thead id: {word.head}\tdependency relation: {word.deprel}\tword: {word.text}"
+      to_print.append(cur_str)
+  for elem in to_print:
+    print(elem)
+
+
 print("Utils have been correctly loaded")
-
-if __name__ == '__main__':
-  
-  import pandas as pd
-  import re
-  from sklearn.model_selection import train_test_split
-  from torch_geometric.loader import DataLoader
-
-  df=pd.read_csv("./Corona_NLP_train.csv", encoding='latin1')
-  # checking for null values
-  overview=pd.concat([df.isnull().sum(),df.nunique()],axis=1,keys=['Null Counts','Cardinality'])
-  overview
-  # and removing them:
-  idx=df.loc[df.Location.isnull()].index
-  df_clean=df.drop(idx)
-  df_clean.shape
-  df_clean[df_clean["OriginalTweet"] == ""]
-  df.drop(columns=['UserName','ScreenName','Location','TweetAt'], inplace=True)
-  def get_long_tweets(df, tweet_lengths):
-      to_retrun = df.loc[tweet_lengths >= 10]
-      return to_retrun
-  tweet_lengths = df['OriginalTweet'].apply(lambda x: len(x.split()))
-  df_lengthy = get_long_tweets(df, tweet_lengths)
-  print(df_lengthy.shape)
-  # tweet cleaning
-  # tweets with a low number of tokens should be eliminated
-
-  def preprocessing(x):
-
-      def remove_hashtags(text): return re.sub(r'#', '' , text)
-      def remove_mentions(text): return re.sub(r'@', '' , text)
-      def remove_urls(text): return re.sub(r'https?://\S+', ' ', text)
-      def change_apostrophe(text): return re.sub(r"Â’", "\'", text)
-      def remove_special_chars(text): return re.sub(r"[^\w. ',-]", ' ', text)
-      def remove_numbers(text): return re.sub(r'[\d]', ' ', text)
-      def remove_formatting_symbols(text): return re.sub(r"[\r\n]+",'',text)
-      def remove_escape_characters(text): return re.sub(r"\\",'',text)
-      def remove_extra_spaces(text): return re.sub(r"\s{2,}",' ',text)
-      def remove_space_before_period(text): return re.sub(r"\s\.", ".", text)
-      def remove_strange_a(text): return "".join(c if ord(c)!=226 else "a" for c in text )
-      x=x.apply(remove_hashtags)
-      x=x.apply(remove_mentions)
-      x=x.apply(remove_urls)
-      x=x.apply(change_apostrophe)
-      x=x.apply(remove_special_chars)
-      x=x.apply(remove_numbers)
-      x=x.apply(remove_formatting_symbols)
-      x=x.apply(remove_escape_characters)
-      x=x.apply(remove_extra_spaces)
-      x=x.apply(remove_space_before_period)
-      x=x.str.lower()
-      x=x.apply(remove_strange_a)
-      return x
-  
-  def label_preprocessing(labels):
-    lab_dict={
-        'Extremely Negative': 0,
-        'Negative': 1,
-        'Neutral': 2,
-        'Positive': 3,
-        'Extremely Positive': 4
-    }
-    labels = labels.map(lab_dict)
-    print(labels)
-    
-    return labels
-  
-  def label_preprocessing_list(labels):
-    lab_dict={
-        'Extremely Negative': 0,
-        'Negative': 1,
-        'Neutral': 2,
-        'Positive': 3,
-        'Extremely Positive': 4
-    }
-    labels = list(map(lab_dict.get, labels))
-    #print(labels)
-    
-    return labels
-
-  df_lengthy['OriginalTweet'] = preprocessing(df_lengthy['OriginalTweet'])
-  df_to_use = df_lengthy[df_lengthy["OriginalTweet"] != " "]
-  #print(df_to_use['Sentiment'] )
-  #df_to_use['Sentiment'] = label_preprocessing(df_to_use['Sentiment'])
-  #print(df_to_use['Sentiment'] )
-
-  train_split, test_split = train_test_split(df_to_use, test_size = 0.2, random_state = 10,
-                                            stratify =  df_to_use["Sentiment"])
-  train_split, val_split = train_test_split(train_split, test_size = 0.2, random_state = 10,
-                                            stratify =  train_split["Sentiment"])
-  print(f"train shape: {train_split.shape}, val shape:{val_split.shape}, test shape:{test_split.shape}")
-
-  tweet_list_train = train_split["OriginalTweet"].tolist()
-  tweet_list_val = val_split["OriginalTweet"].tolist()
-  tweet_list_test = test_split["OriginalTweet"].tolist()
-  sentiment_list_train = train_split["Sentiment"].tolist()
-  sentiment_list_val = val_split["Sentiment"].tolist()
-  sentiment_list_test = test_split["Sentiment"].tolist()
-
-  # remove this if what happens is consistent
-  #print(f'tweet_list_train:\n{tweet_list_train}')
-  #print(f'sentiment_list_train:\n{sentiment_list_train}')
-  #print(f'Sentiment list train converted: {label_preprocessing_list(sentiment_list_train)}')
-
-  sentiment_list_proc_train = label_preprocessing_list(sentiment_list_train)
-  sentiment_list_proc_val = label_preprocessing_list(sentiment_list_val)
-  sentiment_list_proc_test = label_preprocessing_list(sentiment_list_test)
-
-  #delete_processed_files("NewDataset/processed_train/")
-  delete_processed_files("NewDataset/processed_val/")
-
-  #cv19_train = Dataset_from_sentences("train", "NewDataset/processed_train/", "NewDataset/processed_train/", tweet_list_train, sentiment_list_proc_train)
-  cv19_val = Dataset_from_sentences("train", "NewDataset/processed_val/", "NewDataset/processed_val/", tweet_list_val, sentiment_list_proc_val)
-  cv19_test = Dataset_from_sentences("train", "NewDataset/processed_test/", "NewDataset/processed_test/", tweet_list_test, sentiment_list_proc_test)
-  
-  #with open('./NewDataset/processed_train/graph_train.pkl', 'wb') as dt_file:
-  #  pickle.dump(cv19_train, dt_file)
-  
-  with open('./NewDataset/processed_val/graph_val.pkl', 'wb') as dv_file:
-    pickle.dump(cv19_val, dv_file)
-
-  with open('./NewDataset/processed_test/graph_test.pkl', 'wb') as dtest_file:
-    pickle.dump(cv19_test, dtest_file)
-  
-  with open('./NewDataset/processed_train/graph_train.pkl', 'rb') as dt_file:
-    cv19_train = pickle.load(dt_file)
-
-  with open('./NewDataset/processed_val/graph_val.pkl', 'rb') as dv_file:
-    cv19_val = pickle.load(dv_file)
-
-  with open('./NewDataset/processed_test/graph_test.pkl', 'rb') as dtest_file:
-    cv19_test = pickle.load(dtest_file)
-
-  #print(cv19_train.sentences_list)
-  #print(cv19_train.y_values)
-  
-  #print(cv19_train.data_list.x)
-  #print(cv19_train.data_list.y)
-
-  #print(cv19_train.data_list)
-  #collated = Batch.from_data_list(cv19_train.data_list)
-  #print(collated.y)
-  #print(cv19_train.sentences_list)
-  #print(cv19_train.y_values)
-
-  print(cv19_val.data_list)
-  collated = Batch.from_data_list(cv19_val.data_list)
-  print(collated.y)
-  print(cv19_val.sentences_list)
-  print(cv19_val.y_values)
-
-  print(cv19_test.data_list)
-  collated = Batch.from_data_list(cv19_test.data_list)
-  print(collated.y)
-  print(cv19_test.sentences_list)
-  print(cv19_test.y_values)
-
