@@ -26,6 +26,7 @@ import numpy as np
 import matplotlib.pyplot as plt
 from tqdm import tqdm
 from functools import partial
+import time
 
 # torch imports
 import torch
@@ -95,8 +96,6 @@ class GAT_lstm(torch.nn.Module):
     """
     super().__init__()
 
-    #self.first_linear = Linear(dim_in, dim_in)
-
     self.gat_list_1 = torch.nn.ModuleList([GATv2Conv(dim_in, dim_in // heads, heads = heads)
                                          for i in range(0, n_filters)])
     self.gat_list_2 = torch.nn.ModuleList([GATv2Conv(dim_in, dim_in // heads, heads = heads)
@@ -121,7 +120,7 @@ class GAT_lstm(torch.nn.Module):
     """
     Forward function.
     :param x: graph node features. Corresponds to data.x, where data is a point sampled from the graph dataset
-    :param edge_index: edge index data. corresponds to data.edge_index, where data is a point sampleed from the graph dataset
+    :param edge_index: edge index data. corresponds to data.edge_index, where data is a point sampled from the graph dataset
     :param batch: data batch containing all the graph structures.
     :param enable_log: enables some prints to visualize hidden graphs
     """
@@ -206,7 +205,7 @@ def accuracy(pred_y, y):
     """
     return ((pred_y == y).sum() / len(y)).item()
 
-import time
+
 def train(model, strat_train, strat_val, partial_scheduler, epochs = 30, batch_size = 30, print_every = 1, path='Model'):
     """
         Trains a GNN model and return the trained model.
@@ -227,13 +226,13 @@ def train(model, strat_train, strat_val, partial_scheduler, epochs = 30, batch_s
     print(type(scheduler))
     loader_train =  DataLoader(strat_train.data_list, batch_size=batch_size, shuffle=True)
     loader_val = DataLoader(strat_val.data_list, batch_size=batch_size, shuffle=True)
-    
+    model.train()
+
     early_stopper = EarlyStopper(patience=10, min_delta=0.2)
 
     train_losses = []
     val_losses = []
 
-    best_model = []
     best_acc_val = 0
     epochs_to_return = 0
     start_t = time.time()
@@ -241,7 +240,7 @@ def train(model, strat_train, strat_val, partial_scheduler, epochs = 30, batch_s
     for epoch in range(epochs+1):
       mean_loss_train = 0
       mean_acc_train = 0
-      model.train()
+      
       for i, batch in enumerate(loader_train):
         # Training
         out = model(batch.x.to(device), batch.edge_index.to(device), batch.batch.to(device))
